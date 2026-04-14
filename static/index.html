@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MOOS - Micro-Orchestra OS</title>
+    <style>
+        :root {
+            --bg-color: #1e1e1e;
+            --chat-bg: #2d2d2d;
+            --text-color: #d4d4d4;
+            --accent-color: #0e639c;
+            --user-msg-bg: #2b3a42;
+            --bot-msg-bg: #323232;
+            --thought-color: #858585;
+            --tool-color: #b5cea8;
+            --border-color: #404040;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        header {
+            background-color: #333333;
+            padding: 15px 20px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        header h1 {
+            font-size: 1.2rem;
+            font-weight: 600;
+        }
+        
+        .session-info {
+            font-size: 0.85rem;
+            color: #858585;
+        }
+
+        #chat-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .message {
+            max-width: 85%;
+            padding: 12px 16px;
+            border-radius: 8px;
+            line-height: 1.5;
+            word-wrap: break-word;
+        }
+
+        .message.user {
+            align-self: flex-end;
+            background-color: var(--user-msg-bg);
+            border-bottom-right-radius: 2px;
+        }
+
+        .message.bot {
+            align-self: flex-start;
+            background-color: var(--bot-msg-bg);
+            border-bottom-left-radius: 2px;
+            width: 100%;
+        }
+
+        .message.bot .avatar {
+            font-weight: bold;
+            margin-bottom: 8px;
+            color: #4EC9B0;
+        }
+
+        .stream-container {
+            background-color: #1e1e1e;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 10px;
+            margin: 10px 0;
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 0.85rem;
+        }
+
+        .event-thought { color: var(--thought-color); margin-bottom: 4px; }
+        .event-tool { color: #ce9178; margin-bottom: 4px; }
+        .event-obs { color: var(--tool-color); margin-bottom: 4px; padding-left: 10px; border-left: 2px solid var(--border-color); }
+        .event-error { color: #f48771; }
+
+        .final-result {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px dashed var(--border-color);
+            white-space: pre-wrap;
+        }
+
+        #bottom-area {
+            background-color: #252526;
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+        }
+        
+        #attachments-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            padding: 10px 20px 0;
+        }
+
+        .attachment-chip {
+            display: flex;
+            align-items: center;
+            background-color: #333333;
+            border: 1px solid var(--border-color);
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            color: var(--text-color);
+        }
+
+        .attachment-chip .remove-btn {
+            margin-left: 8px;
+            cursor: pointer;
+            color: #858585;
+        }
+        
+        .attachment-chip .remove-btn:hover {
+            color: #f48771;
+        }
+
+        #input-container {
+            padding: 15px 20px 20px;
+            display: flex;
+            gap: 10px;
+        }
+
+        #user-input {
+            flex: 1;
+            background-color: #3c3c3c;
+            border: 1px solid var(--border-color);
+            color: var(--text-color);
+            padding: 12px;
+            border-radius: 6px;
+            font-size: 1rem;
+            resize: none;
+            height: 50px;
+            font-family: inherit;
+        }
+
+        #user-input:focus {
+            outline: none;
+            border-color: var(--accent-color);
+        }
+
+        .upload-btn-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0 10px;
+        }
+        
+        .upload-icon {
+            cursor: pointer;
+            color: #858585;
+            transition: color 0.2s;
+        }
+        
+        .upload-icon:hover {
+            color: var(--text-color);
+        }
+
+        button {
+            background-color: var(--accent-color);
+            color: white;
+            border: none;
+            padding: 0 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: 500;
+            transition: background-color 0.2s;
+        }
+
+        button:hover {
+            background-color: #1177bb;
+        }
+
+        button:disabled {
+            background-color: #404040;
+            cursor: not-allowed;
+            color: #858585;
+        }
+        
+        .typing-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background-color: #d4d4d4;
+            animation: pulse 1.2s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { transform: scale(0.8); opacity: 0.5; }
+            50% { transform: scale(1.2); opacity: 1; }
+            100% { transform: scale(0.8); opacity: 0.5; }
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>MOOS Interactive Terminal</h1>
+        <div class="session-info" id="session-info">Session: connecting...</div>
+    </header>
+
+    <div id="chat-container">
+        <div class="message bot">
+            <div class="avatar">MOOS Agent</div>
+            <div>你好！我是 MOOS，一个具备自主规划与执行能力的智能调度系统。你可以让我帮你分析 workspace 下的文件，或者执行多步任务。</div>
+        </div>
+    </div>
+
+    <div id="bottom-area">
+        <div id="attachments-container"></div>
+        <div id="input-container">
+            <div class="upload-btn-container">
+                <input type="file" id="file-upload" multiple style="display: none;" onchange="handleFileUpload(event)">
+            <svg class="upload-icon" onclick="document.getElementById('file-upload').click()" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="17 8 12 3 7 8"></polyline>
+                <line x1="12" y1="3" x2="12" y2="15"></line>
+            </svg>
+        </div>
+        <textarea id="user-input" placeholder="输入你的指令，例如：分析 workspace/test_file.txt..." rows="1" onkeydown="handleEnter(event)"></textarea>
+        <button id="send-btn" onclick="sendMessage()">发送</button>
+        </div>
+    </div>
+
+    <script>
+        // 生成一个随机的 session id 以保持记忆上下文
+        const sessionId = 'session_' + Math.random().toString(36).substr(2, 9);
+        document.getElementById('session-info').textContent = `Session: ${sessionId}`;
+        
+        const chatContainer = document.getElementById('chat-container');
+        const userInput = document.getElementById('user-input');
+        const sendBtn = document.getElementById('send-btn');
+        
+        let eventSource = null;
+        let attachedFiles = [];
+
+        async function handleFileUpload(event) {
+            const fileInput = event.target;
+            if (!fileInput.files || fileInput.files.length === 0) return;
+            
+            const files = Array.from(fileInput.files);
+            setInputState(true);
+            
+            for (const file of files) {
+                const formData = new FormData();
+                formData.append('file', file);
+                
+                try {
+                    const response = await fetch('/v1/upload', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    const result = await response.json();
+                    
+                    if (result.status === 'success') {
+                        attachedFiles.push({
+                            name: file.name,
+                            path: result.file_path
+                        });
+                        renderAttachments();
+                    } else {
+                        alert(`上传 ${file.name} 失败: ${result.message}`);
+                    }
+                } catch (error) {
+                    console.error("Upload error:", error);
+                    alert(`上传 ${file.name} 时发生网络错误`);
+                }
+            }
+            
+            fileInput.value = '';
+            setInputState(false);
+        }
+        
+        function renderAttachments() {
+            const container = document.getElementById('attachments-container');
+            container.innerHTML = '';
+            
+            attachedFiles.forEach((fileObj, index) => {
+                const chip = document.createElement('div');
+                chip.className = 'attachment-chip';
+                chip.innerHTML = `
+                    📄 ${fileObj.name}
+                    <span class="remove-btn" onclick="removeAttachment(${index})">✕</span>
+                `;
+                container.appendChild(chip);
+            });
+        }
+        
+        window.removeAttachment = function(index) {
+            attachedFiles.splice(index, 1);
+            renderAttachments();
+        };
+
+        function handleEnter(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        }
+
+        function appendUserMessage(text) {
+            const msgDiv = document.createElement('div');
+            msgDiv.className = 'message user';
+            msgDiv.textContent = text;
+            chatContainer.appendChild(msgDiv);
+            scrollToBottom();
+        }
+
+        function createBotMessageContainer() {
+            const msgDiv = document.createElement('div');
+            msgDiv.className = 'message bot';
+            
+            const avatar = document.createElement('div');
+            avatar.className = 'avatar';
+            avatar.textContent = 'MOOS Agent';
+            msgDiv.appendChild(avatar);
+            
+            const streamContainer = document.createElement('div');
+            streamContainer.className = 'stream-container';
+            msgDiv.appendChild(streamContainer);
+            
+            const resultDiv = document.createElement('div');
+            resultDiv.className = 'final-result';
+            resultDiv.style.display = 'none';
+            msgDiv.appendChild(resultDiv);
+            
+            chatContainer.appendChild(msgDiv);
+            scrollToBottom();
+            
+            return { msgDiv, streamContainer, resultDiv };
+        }
+
+        function appendStreamEvent(container, className, text) {
+            const line = document.createElement('div');
+            line.className = className;
+            line.textContent = text;
+            container.appendChild(line);
+            scrollToBottom();
+        }
+
+        function scrollToBottom() {
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        function setInputState(disabled) {
+            userInput.disabled = disabled;
+            sendBtn.disabled = disabled;
+            if (!disabled) {
+                userInput.focus();
+            }
+        }
+
+        function sendMessage() {
+            let text = userInput.value.trim();
+            if (!text && attachedFiles.length === 0) return;
+            
+            userInput.value = '';
+            
+            let displayMsg = text;
+            let fullMsgForBot = text;
+            
+            if (attachedFiles.length > 0) {
+                const filePaths = attachedFiles.map(f => f.path).join(', ');
+                const fileNames = attachedFiles.map(f => f.name).join(', ');
+                
+                if (!displayMsg) {
+                    displayMsg = `[发送了文件: ${fileNames}]`;
+                } else {
+                    displayMsg = `[附件: ${fileNames}]\n${displayMsg}`;
+                }
+                
+                if (!fullMsgForBot) {
+                    fullMsgForBot = `请分析以下文件: ${filePaths}`;
+                } else {
+                    fullMsgForBot = `[Attached files: ${filePaths}]\n\n${fullMsgForBot}`;
+                }
+                
+                attachedFiles = [];
+                renderAttachments();
+            }
+            
+            appendUserMessage(displayMsg);
+            setInputState(true);
+            
+            const { streamContainer, resultDiv } = createBotMessageContainer();
+            
+            // 显示正在思考动画
+            const indicator = document.createElement('div');
+            indicator.className = 'typing-indicator';
+            streamContainer.appendChild(indicator);
+            
+            // 构建 SSE 请求 URL
+            const encodedMsg = encodeURIComponent(fullMsgForBot);
+            const url = `/v1/agent/stream/${sessionId}?message=${encodedMsg}`;
+            
+            eventSource = new EventSource(url);
+            
+            eventSource.onmessage = function(e) {
+                // 移除思考动画
+                if(indicator.parentNode) {
+                    indicator.remove();
+                }
+                
+                const dataStr = e.data;
+                if (dataStr === "[DONE]") {
+                    eventSource.close();
+                    setInputState(false);
+                    return;
+                }
+                
+                try {
+                    const event = JSON.parse(dataStr);
+                    
+                    switch(event.type) {
+                        case 'thought':
+                            appendStreamEvent(streamContainer, 'event-thought', `[${event.node}] ${event.content}`);
+                            break;
+                        case 'tool_call':
+                            appendStreamEvent(streamContainer, 'event-tool', `▶ 调用工具: ${event.tool_name} (参数: ${JSON.stringify(event.tool_args)})`);
+                            break;
+                        case 'observation':
+                            let res = event.result;
+                            if (res.length > 150) res = res.substring(0, 150) + '...';
+                            appendStreamEvent(streamContainer, 'event-obs', `返回结果: ${res}`);
+                            break;
+                        case 'result':
+                            resultDiv.style.display = 'block';
+                            resultDiv.textContent = event.content;
+                            scrollToBottom();
+                            break;
+                        case 'error':
+                            appendStreamEvent(streamContainer, 'event-error', `[错误] ${event.content}`);
+                            break;
+                    }
+                } catch(err) {
+                    console.error("Parse error", err, dataStr);
+                }
+            };
+            
+            eventSource.onerror = function(e) {
+                console.error("SSE Error", e);
+                if(indicator.parentNode) indicator.remove();
+                appendStreamEvent(streamContainer, 'event-error', "与服务器的连接意外断开。");
+                eventSource.close();
+                setInputState(false);
+            };
+        }
+    </script>
+</body>
+</html>
