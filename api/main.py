@@ -15,6 +15,9 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from langchain_core.messages import HumanMessage
 from core.graph import build_graph
+from core.config import setup_logger
+
+logger = setup_logger("moos.api")
 
 # 初始化全局的 LangGraph
 # 这里只初始化一次，确保它能复用内部的 Checkpointer（记忆体）
@@ -41,18 +44,22 @@ async def approve_agent(request: ApproveRequest) -> Dict[str, Any]:
     """
     前端用户审批通过或拒绝 Agent 的工具调用
     """
+    logger.info(f"Received approval request for task {request.task_id}: approved={request.approved}")
     config = {"configurable": {"thread_id": request.task_id}}
     current_state = graph.get_state(config)
     
     if not current_state or not current_state.values.get("next_step") == "await_approval":
+        logger.warning(f"Task {request.task_id} has no pending approval state.")
         return {"status": "error", "message": "No pending approval for this task"}
         
     if request.approved:
         # 用户同意，更新状态，让下一个节点是 tool_node
+        logger.info(f"User approved sensitive tools for task {request.task_id}.")
         graph.update_state(config, {"awaiting_approval": True, "next_step": "tool_node"})
         return {"status": "success", "message": "Operation approved. You can reconnect to /stream to continue."}
     else:
         # 用户拒绝，注入一条系统消息告知大模型，并退回 executor 重新思考
+        logger.info(f"User REJECTED sensitive tools for task {request.task_id}.")
         from langchain_core.messages import SystemMessage
         reject_msg = SystemMessage(content="USER REJECTED your previous tool call request for security reasons. Please try another approach or explain why you must do this.")
         graph.update_state(config, {"messages": [reject_msg], "next_step": "executor"})
@@ -81,6 +88,7 @@ async def _event_generator(task_id: str, message: str = None) -> AsyncGenerator[
             "messages": [HumanMessage(content=message)]
         }
     
+    logger.info(f"Starting event stream for task_id: {task_id}, message: {message[:50] if message else 'None'}")
     try:
         # LangGraph.astream 逐节点吐出执行状态
         async for output in graph.astream(state_input, config=config):
@@ -149,6 +157,7 @@ async def _event_generator(task_id: str, message: str = None) -> AsyncGenerator[
         if not final_answer:
             final_answer = "Task executed but no direct textual response was generated."
             
+        logger.info(f"Stream completed for task {task_id}. Final Answer length: {len(final_answer)}")
         event_data = {
             "type": "result",
             "content": final_answer
@@ -156,6 +165,7 @@ async def _event_generator(task_id: str, message: str = None) -> AsyncGenerator[
         yield f"data: {json.dumps(event_data)}\n\n"
         
     except Exception as e:
+        logger.exception(f"Exception in event stream for task {task_id}: {e}")
         error_data = {
             "type": "error",
             "content": str(e)
@@ -205,12 +215,14 @@ async def upload_file(file: UploadFile = File(...)):
         with open(file_path, "wb") as f:
             f.write(content)
             
+        logger.info(f"File uploaded successfully: {safe_filename} ({len(content)} bytes)")
         return JSONResponse(status_code=200, content={
             "status": "success", 
             "message": f"文件 {safe_filename} 上传成功",
             "file_path": f"workspace/{safe_filename}"
         })
     except Exception as e:
+        logger.exception(f"File upload failed: {e}")
         return JSONResponse(status_code=500, content={
             "status": "error",
             "message": f"文件上传失败: {str(e)}"

@@ -1,5 +1,4 @@
 import os
-import logging
 import asyncio
 from pathlib import Path
 from typing import Dict, Any
@@ -9,9 +8,9 @@ from schema.state import AgentState
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
 from langchain_core.tools import tool
 
-from core.config import get_llm, WORKSPACE_DIR, MAX_HISTORY_MESSAGES
+from core.config import get_llm, WORKSPACE_DIR, MAX_HISTORY_MESSAGES, setup_logger
 
-logger = logging.getLogger(__name__)
+logger = setup_logger("moos.graph")
 
 import subprocess
 
@@ -306,11 +305,13 @@ Otherwise, if it is a standard sequential task, output a concise step-by-step nu
     conversation_context = "\n".join([f"{msg.type}: {msg.content}" for msg in history_messages if msg.content])
     
     try:
+        logger.info("[Planner] Requesting LLM for plan/role-allocation...")
         response = await llm.ainvoke([
             system_prompt, 
             HumanMessage(content=f"Here is the conversation history:\n{conversation_context}\n\nPlease generate the plan or JSON array of roles based on the latest context.")
         ])
         current_plan = response.content
+        logger.debug(f"[Planner] Raw LLM response: {current_plan[:200]}...")
         
         # 尝试解析 JSON 判断是否为并发多 Agent 任务
         text_content = current_plan.strip()
@@ -325,13 +326,14 @@ Otherwise, if it is a standard sequential task, output a concise step-by-step nu
                 worker_tasks = parsed
                 next_step = "parallel_workers"
                 step_msg = f"Planner assigned tasks to {len(worker_tasks)} parallel agents."
+                logger.info(f"[Planner] Split into {len(worker_tasks)} concurrent Map-Reduce tasks.")
             else:
                 step_msg = "Planner dynamically updated the plan based on full context."
         except json.JSONDecodeError:
             step_msg = "Planner dynamically updated the plan based on full context."
 
     except Exception as e:
-        logger.error(f"Planner LLM call failed: {e}")
+        logger.exception(f"[Planner] LLM call or processing failed: {e}")
         step_msg = f"Planner failed to generate plan due to error: {e}"
         worker_tasks = []
         next_step = "executor"
@@ -355,18 +357,23 @@ async def parallel_workers_node(state: AgentState) -> Dict[str, Any]:
     
     llm = get_llm()
     
+    logger.info(f"[Parallel Workers] Dispatching {len(worker_tasks)} workers concurrently.")
     async def run_worker(worker):
         role = worker.get("role", "Expert")
         task = worker.get("task", "")
         prompt = SystemMessage(content=f"You are an expert with the role: {role}. Your task is: {task}. Please provide your detailed analysis and solution. Be direct and professional.")
         try:
+            logger.debug(f"[Worker:{role}] Started task.")
             res = await llm.ainvoke([prompt])
+            logger.debug(f"[Worker:{role}] Finished task.")
             return f"--- [{role}] Report ---\n{res.content}"
         except Exception as e:
+            logger.error(f"[Worker:{role}] Failed: {e}")
             return f"--- [{role}] Report ---\nError: {e}"
             
     tasks = [run_worker(w) for w in worker_tasks]
     results = await asyncio.gather(*tasks)
+    logger.info(f"[Parallel Workers] All {len(worker_tasks)} workers completed.")
     
     return {
         "worker_results": results,
@@ -389,10 +396,13 @@ async def summarizer_node(state: AgentState) -> Dict[str, Any]:
     
     prompt = HumanMessage(content=f"Original Request: {user_req}\n\nExpert Reports:\n{combined_results}\n\nPlease provide the final summary and conclusion.")
     
+    logger.info("[Summarizer] Synthesizing parallel worker results...")
     try:
         res = await llm.ainvoke([sys_prompt, prompt])
         final_message = res
+        logger.info("[Summarizer] Synthesis completed successfully.")
     except Exception as e:
+        logger.exception(f"[Summarizer] Error summarizing results: {e}")
         final_message = AIMessage(content=f"Error summarizing results: {e}")
         
     return {
@@ -407,8 +417,10 @@ async def executor_node(state: AgentState) -> Dict[str, Any]:
     """
     Executor 节点：根据计划调用 Tool 或直接生成回复。
     """
+    logger.info("[Executor] Node started.")
     # 检查是否刚经历了用户审批 (Approval 回调过来的)
     if state.get("awaiting_approval"):
+        logger.info("[Executor] Recovering from user approval. Proceeding to tool_node.")
         return {
             "next_step": "tool_node",
             "awaiting_approval": False, # 已经确认过了，放行
@@ -449,20 +461,24 @@ CRITICAL INSTRUCTION: If a tool returned an error in the previous steps, analyze
             
             if needs_approval:
                 # 触发拦截：暂停在这个节点
+                sensitive_requested = [tc['name'] for tc in response.tool_calls if tc['name'] in sensitive_tools]
+                logger.warning(f"[Executor] LLM requested sensitive tools: {sensitive_requested}. Triggering HITL intercept.")
                 next_step = "await_approval"
-                msg = f"Security Intercept: LLM requested sensitive tools ({[tc['name'] for tc in response.tool_calls if tc['name'] in sensitive_tools]}). Awaiting user approval."
+                msg = f"Security Intercept: LLM requested sensitive tools ({sensitive_requested}). Awaiting user approval."
                 output_msg = response # 先把 tool_calls 存到 message 里
             else:
                 next_step = "tool_node"
                 msg = f"LLM decided to call tools: {[t['name'] for t in response.tool_calls]}"
+                logger.info(f"[Executor] {msg}")
                 output_msg = response
         else:
             next_step = "reviewer"
             msg = "LLM generated a direct response to the user."
+            logger.info("[Executor] Direct textual response generated, proceeding to Reviewer.")
             output_msg = response
             
     except Exception as e:
-        logger.error(f"Executor LLM call failed: {e}")
+        logger.exception(f"[Executor] LLM call failed: {e}")
         next_step = "reviewer"
         msg = f"Executor failed due to API error: {e}"
         # 生成一个兜底回复，防止图崩溃
@@ -481,14 +497,18 @@ async def execute_single_tool(tool_call, tools_by_name):
     tool_instance = tools_by_name.get(tool_name)
     
     if tool_instance:
+        logger.info(f"[Tool:{tool_name}] Executing with args: {tool_args}")
         try:
             # 优化点 4：使用 ainvoke 支持异步并发执行
             result = await tool_instance.ainvoke(tool_args)
             step_msg = f"Executed tool: {tool_name} successfully."
+            logger.debug(f"[Tool:{tool_name}] Result: {str(result)[:200]}...")
         except Exception as e:
+            logger.exception(f"[Tool:{tool_name}] Execution failed: {e}")
             result = f"Error during tool execution: {e}"
             step_msg = f"Tool {tool_name} execution failed: {e}"
     else:
+        logger.error(f"[ToolNode] Requested unknown tool: {tool_name}")
         result = f"Tool {tool_name} not found."
         step_msg = f"Failed to find tool: {tool_name}."
         
@@ -539,15 +559,18 @@ async def reviewer_node(state: AgentState) -> Dict[str, Any]:
     # 优化点 5：Reviewer 加入 LLM 判断，实现智能反射 (Reflector) 循环
     checker_prompt = f"根据以下最近的对话，判断用户的初始目标是否已完全达成，或者系统是否已经给出了最终明确的答复。如果已达成或已答复，回复 YES；如果认为还需要调用工具或重新规划才能完成，回复 NO。\n\n对话内容:\n{conversation_text}"
     
+    logger.info("[Reviewer] Checking task completion status...")
     try:
         res = await llm.ainvoke([HumanMessage(content=checker_prompt)])
         if "YES" in res.content.upper():
+            logger.info("[Reviewer] Conclusion: Task COMPLETED. Ending flow.")
             return {"next_step": END, "internal_steps": ["[Reviewer] 目标已达成或已答复，结束当前执行流。"]}
         else:
             # 如果没完成，回到 planner 重新审视计划
+            logger.info("[Reviewer] Conclusion: Task INCOMPLETE. Returning to planner.")
             return {"next_step": "planner", "internal_steps": ["[Reviewer] 任务未完全结束，请求重新规划。"]}
     except Exception as e:
-        logger.error(f"Reviewer LLM call failed: {e}")
+        logger.exception(f"[Reviewer] LLM check failed: {e}")
         return {"next_step": END, "internal_steps": ["[Reviewer] Error checking completion status, pausing."]}
 
 def should_continue(state: AgentState) -> str:

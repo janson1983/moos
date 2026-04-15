@@ -1,4 +1,6 @@
 import os
+import logging
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from langchain_openai import ChatOpenAI
 
@@ -21,6 +23,43 @@ WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
 # 限制上下文保留的最大消息数，防止 Token 溢出
 MAX_HISTORY_MESSAGES = int(os.getenv("MAX_HISTORY_MESSAGES", "20"))
 
+# ==========================================
+# 日志系统配置
+# ==========================================
+LOGS_DIR = Path(__file__).parent.parent / "logs"
+LOGS_DIR.mkdir(parents=True, exist_ok=True)
+LOG_FILE = LOGS_DIR / "moos.log"
+
+def setup_logger(name: str):
+    """
+    配置并获取一个具有控制台和文件双输出的全局 Logger。
+    采用 RotatingFileHandler 控制日志文件大小。
+    """
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.INFO)
+    
+    if not logger.handlers:
+        formatter = logging.Formatter(
+            '%(asctime)s | %(levelname)-8s | [%(filename)s:%(lineno)d] | %(message)s',
+            datefmt='%Y-%m-%d %H:%main:%S'
+        )
+        
+        # 文件输出：每个文件最大 5MB，最多保留 5 个备份
+        file_handler = RotatingFileHandler(
+            LOG_FILE, maxBytes=5 * 1024 * 1024, backupCount=5, encoding='utf-8'
+        )
+        file_handler.setFormatter(formatter)
+        file_handler.setLevel(logging.INFO)
+        
+        # 控制台输出
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+        console_handler.setLevel(logging.DEBUG)
+        
+        logger.addHandler(file_handler)
+        logger.addHandler(console_handler)
+        
+    return logger
 
 # ==========================================
 # 大模型 (LLM) 配置
