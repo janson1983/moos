@@ -101,14 +101,24 @@ async def parallel_workers_node(state: AgentState) -> Dict[str, Any]:
     llm = get_llm()
     
     logger.info(f"[Parallel Workers] Dispatching {len(worker_tasks)} workers concurrently.")
+    # 因为 astream 流是节点级别的，我们在进入该节点时先返回一条状态
+    # 但是 LangGraph 不支持在同一个节点内多次 yield state。
+    # 我们可以通过回调将中间日志推送到日志系统，但前端只能看到 `internal_steps`。
+    
+    # 既然我们无法在这个节点执行中途向 astream 推送状态（除非拆成更多节点），
+    # 我们可以尝试使用 LangChain 的 Callbacks 来打印大模型流式思考的过程。
+    # 但为了保持现有架构，我们将使用一个折中方案：把角色分解到日志里，并直接执行。
+    roles_str = ", ".join([w.get("role", "Expert") for w in worker_tasks])
+    logger.info(f"[Parallel Workers] Dispatching {len(worker_tasks)} workers: {roles_str}")
+    
     async def run_worker(worker):
         role = worker.get("role", "Expert")
         task = worker.get("task", "")
         prompt = SystemMessage(content=f"You are an expert with the role: {role}. Your task is: {task}. Please provide your detailed analysis and solution. Be direct and professional.")
         try:
-            logger.debug(f"[Worker:{role}] Started task.")
+            logger.info(f"[Worker:{role}] is thinking...")
             res = await llm.ainvoke([prompt])
-            logger.debug(f"[Worker:{role}] Finished task.")
+            logger.info(f"[Worker:{role}] finished. Generated {len(res.content)} chars.")
             return f"--- [{role}] Report ---\n{res.content}"
         except Exception as e:
             logger.error(f"[Worker:{role}] Failed: {e}")
@@ -116,18 +126,14 @@ async def parallel_workers_node(state: AgentState) -> Dict[str, Any]:
             
     tasks = [run_worker(w) for w in worker_tasks]
     results = await asyncio.gather(*tasks)
-    logger.info(f"[Parallel Workers] All {len(worker_tasks)} workers completed.")
-    
-    # 增加更细致的日志，将分配的角色列表展示给用户
-    roles_str = ", ".join([w.get("role", "Expert") for w in worker_tasks])
     
     return {
         "worker_results": results,
         "next_step": "summarizer",
         "internal_steps": [
-            f"[Parallel Workers] 分配了 {len(worker_tasks)} 个并行专家 Agent 开始处理。",
-            f"[Parallel Workers] 涉及的角色包括: {roles_str}。",
-            f"[Parallel Workers] 所有 {len(worker_tasks)} 个专家并发分析已完成，正在提交汇总..."
+            f"[Parallel Workers] 已启动 {len(worker_tasks)} 个专家 Agent 并发处理任务。",
+            f"[Parallel Workers] 参与角色: {roles_str}",
+            f"[Parallel Workers] 各专家已提交独立分析报告，共收集到 {len(results)} 份。准备开始合并汇总..."
         ]
     }
 
