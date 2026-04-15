@@ -55,14 +55,16 @@ async def approve_agent(request: ApproveRequest) -> Dict[str, Any]:
     if request.approved:
         # 用户同意，更新状态，让下一个节点是 tool_node，并清除审批挂起标志
         logger.info(f"User approved sensitive tools for task {request.task_id}.")
-        graph.update_state(config, {"awaiting_approval": False, "next_step": "tool_node"})
+        # 注意: 如果前端此时调用 stream 且没有传 message，其实 stream 函数里默认是从 current node 开始恢复的
+        # 但是这里我们让 executor 感知到 is_approved 从而自己路由到 tool_node
+        graph.update_state(config, {"awaiting_approval": False, "is_approved": True, "next_step": "executor"})
         return {"status": "success", "message": "Operation approved. You can reconnect to /stream to continue."}
     else:
         # 用户拒绝，注入一条系统消息告知大模型，并退回 executor 重新思考，并清除审批挂起标志
         logger.info(f"User REJECTED sensitive tools for task {request.task_id}.")
         from langchain_core.messages import SystemMessage
         reject_msg = SystemMessage(content="USER REJECTED your previous tool call request for security reasons. Please try another approach or explain why you must do this.")
-        graph.update_state(config, {"messages": [reject_msg], "awaiting_approval": False, "next_step": "executor"})
+        graph.update_state(config, {"messages": [reject_msg], "awaiting_approval": False, "is_approved": False, "next_step": "executor"})
         return {"status": "success", "message": "Operation rejected. You can reconnect to /stream to see new plan."}
 
 @router.post("/run")
@@ -182,6 +184,8 @@ async def stream_agent(task_id: str, request: Request, message: str = None):
     例如 GET /v1/agent/stream/task_001?message=帮我分析一下文件
     如果不传 message，则视为从上一次断点 (如 Approval 后) 恢复执行。
     """
+    # 修复：当不带 message 时 (也就是 Approval 后重连)，我们需要显式传入 `None`。
+    # 因为 FastAPI 对于 GET 中不传的 query param 会给 None，我们只需透传。
     return StreamingResponse(
         _event_generator(task_id, message),
         media_type="text/event-stream"

@@ -30,3 +30,4 @@ class AgentState(TypedDict):
     # 待用户确认的敏感操作拦截器 (Human-in-the-Loop)
     pending_tool_calls: list[dict]
     awaiting_approval: bool
+    is_approved: bool

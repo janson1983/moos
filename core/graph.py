@@ -162,11 +162,11 @@ async def executor_node(state: AgentState) -> Dict[str, Any]:
     """
     logger.info("[Executor] Node started.")
     # 检查是否刚经历了用户审批 (Approval 回调过来的)
-    if state.get("awaiting_approval"):
+    if state.get("is_approved"):
         logger.info("[Executor] Recovering from user approval. Proceeding to tool_node.")
         return {
             "next_step": "tool_node",
-            "awaiting_approval": False, # 已经确认过了，放行
+            "is_approved": False, # 消耗掉批准标记
             "internal_steps": ["[Executor] User approved the sensitive operations. Proceeding to execution."]
         }
 
@@ -215,6 +215,7 @@ CRITICAL INSTRUCTION: If a tool returned an error in the previous steps, analyze
                     "messages": [output_msg],
                     "next_step": next_step,
                     "awaiting_approval": True, # 标记为等待审批
+                    "is_approved": False,
                     "internal_steps": [f"[Executor] {msg}"]
                 }
             else:
