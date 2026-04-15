@@ -14,12 +14,13 @@
 * **Sandbox**: 异步 `subprocess` 封装 (执行 Python/Shell)。
 * **Storage**: SQLite (任务追踪) + 内存状态快照。
 
-### 2.2 逻辑模型 (The ReAct Loop)
-系统遵循 **Plan -> Action -> Observe -> Reflect** 循环：
-1. **Planner**: 将用户目标拆解为任务列表。
-2. **Executor**: 根据任务调用相应 Agent 和 Tools。
-3. **Observer**: 捕获工具输出（stdout/stderr/API Result）。
-4. **Reflector**: 判断是否达到预期，若失败则修正计划重新执行。
+### 2.2 逻辑模型 (The ReAct Loop & Map-Reduce)
+系统遵循 **Plan -> Action -> Observe -> Reflect** 循环以及**并发多 Agent 分析**：
+1. **Planner**: 将用户目标拆解为顺序任务列表。如果识别出需要多角色/多视角处理，则生成并发任务。
+2. **Parallel Workers & Summarizer**: 针对多角色任务，并发请求大模型执行各专家的分析，最后汇总输出。
+3. **Executor**: 针对普通顺序任务，调用相应 Agent 和 Tools 执行操作。
+4. **Observer**: 捕获工具输出（stdout/stderr/API Result）。
+5. **Reflector (Reviewer)**: 判断是否达到预期，若失败则修正计划重新执行。
 
 ---
 
@@ -67,7 +68,8 @@
 
 **架构与功能要求：**
 1. **核心 Agent (core/graph.py)**:
-   - 使用 `LangGraph` 构建一个状态图，包含四个节点：`Planner` (任务规划) -> `Executor` (工具调用决策) -> `Tool_Node` (并发执行工具) -> `Reviewer` (反思检查是否完成)。
+   - 使用 `LangGraph` 构建状态图，包含基础循环节点：`Planner` (任务规划) -> `Executor` (工具调用) -> `Tool_Node` (执行) -> `Reviewer` (反思)。
+   - 引入 **Map-Reduce 并发多 Agent 架构**：当 `Planner` 判断任务需要多视角或不同角色时，生成 JSON 数组流转给 `parallel_workers` 节点并发执行大模型分析，最后由 `summarizer` 节点汇总结论。
    - 必须使用异步 (`async`) 并在执行过程中抛出中间的思考步骤 (`internal_steps`)。
 2. **工具集 (Tools)**:
    - 实现四个基础工具：`read_file`, `edit_file`, `delete_file`, `execute_shell`。

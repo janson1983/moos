@@ -15,6 +15,7 @@ MOOS 是一个基于 **LangGraph** 和 **FastAPI** 构建的**极简多智能体
 ## 🌟 核心特性
 
 - 🧠 **思维闭环**：内置 Planner、Executor、Tool Node、Reviewer 四大核心节点，支持动态目标拆解与自我纠错。
+- 🚀 **并发多 Agent 架构 (Map-Reduce)**：当任务需要多视角或多角色分析时，Planner 可自动拆解子任务并分配给多个 Worker 并发执行，最后由 Master Summarizer 节点汇总结论，极大提升复杂任务的处理效率。
 - ⚡ **SSE 流式输出**：前端实时感知 Agent 的内部执行步骤（Internal Steps）和调用状态，告别长时间的黑盒等待。
 - 🛡️ **沙盒安全机制**：工具的执行范围被严格限制在 `workspace/` 目录下，防止大模型通过 `../` 或绝对路径破坏宿主机的系统文件。
 - 📂 **多文件暂存区（Staging Area）**：原生支持多个文件的选中上传与可视化管理，结合 Prompt 一起发送给 Agent 进行分析。
@@ -107,10 +108,13 @@ uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
 1. **添加新工具 (Tools)**：
    只需在 `core/graph.py` 中编写带 `@tool` 装饰器的 Python 函数，并将其加入底部的 `tools = [...]` 列表中即可。系统会自动将其绑定到 Executor 节点。
    
-2. **优化反思逻辑 (Reviewer)**：
+2. **并发多 Agent (Map-Reduce) 扩展**：
+   当前系统已内置了 `parallel_workers` 和 `summarizer` 节点。您可以尝试让它扮演不同领域的专家对同一问题进行深度剖析，比如“请用三个不同的角色（财务分析师、技术总监、风险经理）同时帮我评估这个商业计划书，最后给出综合建议”。
+
+3. **优化反思逻辑 (Reviewer)**：
    当前的 `reviewer_node` 利用简单的 LLM 提问来决定是否 "YES"（达成任务）或 "NO"（重新规划）。您可以引入更复杂的打分机制或专家审核链来强化任务完成度。
 
-3. **修改前端样式**：
+4. **修改前端样式**：
    前端采用原生 HTML+CSS+JS 编写，没有复杂的打包工具束缚。直接修改 `static/index.html` 刷新页面即可生效，非常适合快速魔改。
 
 ---
