@@ -26,3 +26,7 @@ class AgentState(TypedDict):
     
     # 多智能体并发执行的结果集合
     worker_results: list[str]
+    
+    # 待用户确认的敏感操作拦截器 (Human-in-the-Loop)
+    pending_tool_calls: list[dict]
+    awaiting_approval: bool
