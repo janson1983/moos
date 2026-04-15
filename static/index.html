@@ -263,6 +263,7 @@
         const sendBtn = document.getElementById('send-btn');
         
         let eventSource = null;
+        let currentTaskId = null; // 用于挂起和恢复
         let attachedFiles = [];
 
         async function handleFileUpload(event) {
@@ -413,16 +414,28 @@
             appendUserMessage(displayMsg);
             setInputState(true);
             
-            const { streamContainer, resultDiv } = createBotMessageContainer();
+            currentTaskId = sessionId;
+            const { streamContainer, resultDiv, msgDiv } = createBotMessageContainer();
             
+            // 构建初始包含消息的连接
+            startSSEStream(currentTaskId, fullMsgForBot, streamContainer, resultDiv, msgDiv);
+        }
+
+        function startSSEStream(taskId, prompt, streamContainer, resultDiv, msgDiv) {
             // 显示正在思考动画
             const indicator = document.createElement('div');
             indicator.className = 'typing-indicator';
             streamContainer.appendChild(indicator);
             
             // 构建 SSE 请求 URL
-            const encodedMsg = encodeURIComponent(fullMsgForBot);
-            const url = `/v1/agent/stream/${sessionId}?message=${encodedMsg}`;
+            let url = `/v1/agent/stream/${taskId}`;
+            if (prompt) {
+                url += `?message=${encodeURIComponent(prompt)}`;
+            }
+            
+            if (eventSource) {
+                eventSource.close();
+            }
             
             eventSource = new EventSource(url);
             
@@ -459,22 +472,77 @@
                             resultDiv.textContent = event.content;
                             scrollToBottom();
                             break;
+                        case 'require_approval':
+                            // 拦截事件：展示同意和拒绝按钮
+                            const approvalBox = document.createElement('div');
+                            approvalBox.id = `approval-${taskId}`;
+                            approvalBox.style.background = 'rgba(255,165,0,0.1)';
+                            approvalBox.style.border = '1px solid orange';
+                            approvalBox.style.padding = '15px';
+                            approvalBox.style.borderRadius = '8px';
+                            approvalBox.style.marginTop = '15px';
+                            
+                            approvalBox.innerHTML = `
+                                <div style="color: orange; font-weight: bold; margin-bottom: 10px;">⚠️ 敏感操作预警</div>
+                                <div style="margin-bottom: 15px;">Agent 想要执行敏感操作（如删除文件、执行命令）。请确认是否允许。</div>
+                                <div style="display: flex; gap: 10px;">
+                                    <button onclick="handleApproval(true)" style="background: #4caf50; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer;">允许执行 (Approve)</button>
+                                    <button onclick="handleApproval(false)" style="background: #f44336; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer;">拒绝执行 (Reject)</button>
+                                </div>
+                            `;
+                            msgDiv.appendChild(approvalBox);
+                            scrollToBottom();
+                            break;
                         case 'error':
                             appendStreamEvent(streamContainer, 'event-error', `[错误] ${event.content}`);
                             break;
                     }
                 } catch(err) {
-                    console.error("Parse error", err, dataStr);
+                    console.error("Parse error", err, e.data);
                 }
             };
             
             eventSource.onerror = function(e) {
                 console.error("SSE Error", e);
                 if(indicator.parentNode) indicator.remove();
-                appendStreamEvent(streamContainer, 'event-error', "与服务器的连接意外断开。");
+                appendStreamEvent(streamContainer, 'event-error', "与服务器的连接断开或结束。");
                 eventSource.close();
                 setInputState(false);
             };
+        }
+
+        async function handleApproval(isApproved) {
+            if (!currentTaskId) return;
+            
+            const box = document.getElementById(`approval-${currentTaskId}`);
+            if (box) {
+                box.innerHTML = `<div style="color: ${isApproved ? '#4caf50' : '#f44336'}; font-weight: bold;">[User ${isApproved ? 'Approved' : 'Rejected'}] 操作已提交，等待 Agent 响应...</div>`;
+            }
+
+            try {
+                const response = await fetch('/v1/agent/approve', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ task_id: currentTaskId, approved: isApproved })
+                });
+                const resData = await response.json();
+                
+                if (resData.status === 'success') {
+                    // 重新建立 SSE 连接，不带 message 恢复断点执行
+                    // 为了简化，我们找到刚才那个盒子的父级来继续流
+                    const msgDiv = box.parentNode;
+                    const streamContainer = msgDiv.querySelector('.stream-container');
+                    const resultDiv = msgDiv.querySelector('.final-result');
+                    
+                    startSSEStream(currentTaskId, null, streamContainer, resultDiv, msgDiv);
+                } else {
+                    alert('Approval failed: ' + resData.message);
+                    setInputState(false);
+                }
+            } catch (e) {
+                alert('Error submitting approval: ' + e);
+                setInputState(false);
+            }
         }
     </script>
 </body>

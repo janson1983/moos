@@ -407,10 +407,17 @@ async def executor_node(state: AgentState) -> Dict[str, Any]:
     """
     Executor 节点：根据计划调用 Tool 或直接生成回复。
     """
+    # 检查是否刚经历了用户审批 (Approval 回调过来的)
+    if state.get("awaiting_approval"):
+        return {
+            "next_step": "tool_node",
+            "awaiting_approval": False, # 已经确认过了，放行
+            "internal_steps": ["[Executor] User approved the sensitive operations. Proceeding to execution."]
+        }
+
     messages = state.get("messages", [])
     current_plan = state.get("current_plan", "")
     
-    # 优化点 2：Token 溢出预防。截断历史，防止 Token 爆炸
     history_messages = _truncate_history(messages)
     
     llm = get_llm().bind_tools(tools)
@@ -436,9 +443,19 @@ CRITICAL INSTRUCTION: If a tool returned an error in the previous steps, analyze
         
         # 判断是否需要调用工具
         if getattr(response, "tool_calls", None):
-            next_step = "tool_node"
-            msg = f"LLM decided to call tools: {[t['name'] for t in response.tool_calls]}"
-            output_msg = response
+            # HITL 检查：是否包含危险工具 (删除文件、执行命令)
+            sensitive_tools = ["delete_file", "execute_shell"]
+            needs_approval = any(tc['name'] in sensitive_tools for tc in response.tool_calls)
+            
+            if needs_approval:
+                # 触发拦截：暂停在这个节点
+                next_step = "await_approval"
+                msg = f"Security Intercept: LLM requested sensitive tools ({[tc['name'] for tc in response.tool_calls if tc['name'] in sensitive_tools]}). Awaiting user approval."
+                output_msg = response # 先把 tool_calls 存到 message 里
+            else:
+                next_step = "tool_node"
+                msg = f"LLM decided to call tools: {[t['name'] for t in response.tool_calls]}"
+                output_msg = response
         else:
             next_step = "reviewer"
             msg = "LLM generated a direct response to the user."
@@ -537,6 +554,10 @@ def should_continue(state: AgentState) -> str:
     """
     路由逻辑，根据 next_step 决定下一个节点
     """
+    # 如果处于等待审批状态，直接中断流，图引擎在这里暂停
+    if state.get("next_step") == "await_approval":
+        return END
+        
     return state.get("next_step", END)
 
 def build_graph() -> StateGraph:

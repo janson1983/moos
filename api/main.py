@@ -32,6 +32,32 @@ class RunAgentResponse(BaseModel):
     status: str
     task_id: str
 
+class ApproveRequest(BaseModel):
+    task_id: str
+    approved: bool # True: 继续执行, False: 拒绝执行并让模型重新思考
+
+@router.post("/approve")
+async def approve_agent(request: ApproveRequest) -> Dict[str, Any]:
+    """
+    前端用户审批通过或拒绝 Agent 的工具调用
+    """
+    config = {"configurable": {"thread_id": request.task_id}}
+    current_state = graph.get_state(config)
+    
+    if not current_state or not current_state.values.get("next_step") == "await_approval":
+        return {"status": "error", "message": "No pending approval for this task"}
+        
+    if request.approved:
+        # 用户同意，更新状态，让下一个节点是 tool_node
+        graph.update_state(config, {"awaiting_approval": True, "next_step": "tool_node"})
+        return {"status": "success", "message": "Operation approved. You can reconnect to /stream to continue."}
+    else:
+        # 用户拒绝，注入一条系统消息告知大模型，并退回 executor 重新思考
+        from langchain_core.messages import SystemMessage
+        reject_msg = SystemMessage(content="USER REJECTED your previous tool call request for security reasons. Please try another approach or explain why you must do this.")
+        graph.update_state(config, {"messages": [reject_msg], "next_step": "executor"})
+        return {"status": "success", "message": "Operation rejected. You can reconnect to /stream to see new plan."}
+
 @router.post("/run")
 async def run_agent(request: RunAgentRequest) -> RunAgentResponse:
     """
@@ -40,7 +66,7 @@ async def run_agent(request: RunAgentRequest) -> RunAgentResponse:
     """
     return RunAgentResponse(status="Task queued (or use /stream directly)", task_id=request.task_id)
 
-async def _event_generator(task_id: str, message: str) -> AsyncGenerator[str, None]:
+async def _event_generator(task_id: str, message: str = None) -> AsyncGenerator[str, None]:
     """
     负责运行 LangGraph 的迭代过程，并将中间结果生成 Server-Sent Events (SSE) 流
     """
@@ -48,14 +74,28 @@ async def _event_generator(task_id: str, message: str) -> AsyncGenerator[str, No
     config = {"configurable": {"thread_id": task_id}}
     
     # 构建当前周期的输入状态
-    state_input = {
-        "messages": [HumanMessage(content=message)]
-    }
+    # 如果 message 为空，说明这是一次 Approve/Reject 之后的恢复执行 (从断点继续)
+    state_input = None
+    if message:
+        state_input = {
+            "messages": [HumanMessage(content=message)]
+        }
     
     try:
         # LangGraph.astream 逐节点吐出执行状态
         async for output in graph.astream(state_input, config=config):
             for node_name, state_update in output.items():
+                
+                # 检查是否触发了审批挂起
+                if state_update.get("next_step") == "await_approval":
+                    event_data = {
+                        "type": "require_approval",
+                        "content": "Agent requested sensitive operations. Awaiting user approval."
+                    }
+                    yield f"data: {json.dumps(event_data)}\n\n"
+                    # 挂起流并结束本次 SSE (图引擎已经由 should_continue 中断)
+                    yield "data: [DONE]\n\n"
+                    return
                 
                 # 如果这个节点有内部思考步骤 (internal_steps) 需要推送到前端
                 if "internal_steps" in state_update:
@@ -126,10 +166,11 @@ async def _event_generator(task_id: str, message: str) -> AsyncGenerator[str, No
     yield "data: [DONE]\n\n"
 
 @router.get("/stream/{task_id}")
-async def stream_agent(task_id: str, message: str, request: Request):
+async def stream_agent(task_id: str, request: Request, message: str = None):
     """
     提供 SSE 接口：
     例如 GET /v1/agent/stream/task_001?message=帮我分析一下文件
+    如果不传 message，则视为从上一次断点 (如 Approval 后) 恢复执行。
     """
     return StreamingResponse(
         _event_generator(task_id, message),
