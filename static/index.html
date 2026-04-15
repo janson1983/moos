@@ -224,6 +224,7 @@
     </style>
 </head>
 <body>
+    <div id="toast-container" style="position: fixed; bottom: 80px; right: 20px; z-index: 1000; display: flex; flex-direction: column; gap: 10px; max-width: 350px;"></div>
 
     <header>
         <h1>MOOS Interactive Terminal</h1>
@@ -265,6 +266,11 @@
         let eventSource = null;
         let currentTaskId = null; // 用于挂起和恢复
         let attachedFiles = [];
+        
+        let activeStreamContainer = null;
+        let activeResultDiv = null;
+        let activeMsgDiv = null;
+        let isAwaitingApproval = false;
 
         async function handleFileUpload(event) {
             const fileInput = event.target;
@@ -417,6 +423,11 @@
             currentTaskId = sessionId;
             const { streamContainer, resultDiv, msgDiv } = createBotMessageContainer();
             
+            activeStreamContainer = streamContainer;
+            activeResultDiv = resultDiv;
+            activeMsgDiv = msgDiv;
+            isAwaitingApproval = false;
+            
             // 构建初始包含消息的连接
             startSSEStream(currentTaskId, fullMsgForBot, streamContainer, resultDiv, msgDiv);
         }
@@ -448,7 +459,9 @@
                 const dataStr = e.data;
                 if (dataStr === "[DONE]") {
                     eventSource.close();
-                    setInputState(false);
+                    if (!isAwaitingApproval) {
+                        setInputState(false);
+                    }
                     return;
                 }
                 
@@ -473,33 +486,35 @@
                             scrollToBottom();
                             break;
                         case 'require_approval':
-                            // 拦截事件：展示同意和拒绝按钮（紧凑版）
-                            const uniqueBoxId = `approval-${taskId}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-                            const approvalBox = document.createElement('div');
-                            approvalBox.id = uniqueBoxId;
-                            approvalBox.style.background = 'rgba(255,165,0,0.05)';
-                            approvalBox.style.border = '1px solid rgba(255,165,0,0.4)';
-                            approvalBox.style.padding = '8px 12px';
-                            approvalBox.style.borderRadius = '6px';
-                            approvalBox.style.marginTop = '8px';
-                            approvalBox.style.display = 'flex';
-                            approvalBox.style.justifyContent = 'space-between';
-                            approvalBox.style.alignItems = 'center';
-                            approvalBox.style.flexWrap = 'wrap';
-                            approvalBox.style.gap = '10px';
+                            isAwaitingApproval = true;
+                            appendStreamEvent(streamContainer, 'event-thought', `[System] ⚠️ Agent 请求执行敏感操作，已挂起等待审批。`);
                             
-                            approvalBox.innerHTML = `
-                                <div style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 200px;">
-                                    <span style="color: orange; font-weight: bold; font-size: 0.9rem; flex-shrink: 0;">⚠️ 敏感操作预警:</span>
-                                    <span style="font-size: 0.85rem; color: #ccc;">Agent 请求执行敏感操作，请确认是否允许。</span>
+                            // 拦截事件：展示右下角悬浮弹窗
+                            const uniqueBoxId = `approval-${taskId}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+                            const toastBox = document.createElement('div');
+                            toastBox.id = uniqueBoxId;
+                            toastBox.style.background = '#2b2b2b';
+                            toastBox.style.border = '1px solid orange';
+                            toastBox.style.padding = '12px 16px';
+                            toastBox.style.borderRadius = '8px';
+                            toastBox.style.boxShadow = '0 4px 15px rgba(0,0,0,0.4)';
+                            toastBox.style.display = 'flex';
+                            toastBox.style.flexDirection = 'column';
+                            toastBox.style.gap = '10px';
+                            
+                            toastBox.innerHTML = `
+                                <div style="display: flex; align-items: center; gap: 8px;">
+                                    <span style="color: orange; font-weight: bold; font-size: 0.95rem;">⚠️ 敏感操作预警</span>
                                 </div>
-                                <div style="display: flex; gap: 8px; flex-shrink: 0;">
-                                    <button onclick="handleApproval(true, '${uniqueBoxId}')" style="background: #4caf50; color: white; border: none; padding: 5px 12px; border-radius: 4px; cursor: pointer; font-size: 0.85rem;">允许</button>
-                                    <button onclick="handleApproval(false, '${uniqueBoxId}')" style="background: #f44336; color: white; border: none; padding: 5px 12px; border-radius: 4px; cursor: pointer; font-size: 0.85rem;">拒绝</button>
+                                <div style="font-size: 0.85rem; color: #ccc; line-height: 1.4;">
+                                    Agent 请求执行敏感操作（如删除文件、执行命令），请确认是否允许。
+                                </div>
+                                <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px;">
+                                    <button onclick="handleApproval(true, '${uniqueBoxId}')" style="background: #4caf50; color: white; border: none; padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 0.85rem;">允许</button>
+                                    <button onclick="handleApproval(false, '${uniqueBoxId}')" style="background: #f44336; color: white; border: none; padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 0.85rem;">拒绝</button>
                                 </div>
                             `;
-                            msgDiv.appendChild(approvalBox);
-                            scrollToBottom();
+                            document.getElementById('toast-container').appendChild(toastBox);
                             break;
                         case 'error':
                             appendStreamEvent(streamContainer, 'event-error', `[错误] ${event.content}`);
@@ -524,9 +539,21 @@
             
             const box = document.getElementById(boxId);
             if (box) {
-                box.style.display = 'block';
-                box.style.padding = '8px 12px';
-                box.innerHTML = `<div style="color: ${isApproved ? '#4caf50' : '#f44336'}; font-size: 0.85rem;">✓ [User ${isApproved ? 'Approved' : 'Rejected'}] 操作已提交，等待 Agent 响应...</div>`;
+                box.innerHTML = `
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="color: ${isApproved ? '#4caf50' : '#f44336'}; font-weight: bold; font-size: 0.95rem;">${isApproved ? '✓ 已允许' : '✕ 已拒绝'}</span>
+                    </div>
+                    <div style="font-size: 0.85rem; color: #858585; line-height: 1.4;">操作已提交，系统将继续执行...</div>
+                `;
+                
+                // 5秒后淡出并移除
+                setTimeout(() => {
+                    if (box && box.parentNode) {
+                        box.style.transition = 'opacity 0.5s ease-out';
+                        box.style.opacity = '0';
+                        setTimeout(() => box.remove(), 500);
+                    }
+                }, 5000);
             }
 
             try {
@@ -538,19 +565,17 @@
                 const resData = await response.json();
                 
                 if (resData.status === 'success') {
-                    // 重新建立 SSE 连接，不带 message 恢复断点执行
-                    // 为了简化，我们找到刚才那个盒子的父级来继续流
-                    const msgDiv = box.parentNode;
-                    const streamContainer = msgDiv.querySelector('.stream-container');
-                    const resultDiv = msgDiv.querySelector('.final-result');
-                    
-                    startSSEStream(currentTaskId, null, streamContainer, resultDiv, msgDiv);
+                    isAwaitingApproval = false;
+                    appendStreamEvent(activeStreamContainer, 'event-thought', `[System] 用户已${isApproved ? '允许' : '拒绝'}该操作，恢复执行...`);
+                    startSSEStream(currentTaskId, null, activeStreamContainer, activeResultDiv, activeMsgDiv);
                 } else {
                     alert('Approval failed: ' + resData.message);
+                    isAwaitingApproval = false;
                     setInputState(false);
                 }
             } catch (e) {
                 alert('Error submitting approval: ' + e);
+                isAwaitingApproval = false;
                 setInputState(false);
             }
         }
