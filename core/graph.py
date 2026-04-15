@@ -118,10 +118,17 @@ async def parallel_workers_node(state: AgentState) -> Dict[str, Any]:
     results = await asyncio.gather(*tasks)
     logger.info(f"[Parallel Workers] All {len(worker_tasks)} workers completed.")
     
+    # 增加更细致的日志，将分配的角色列表展示给用户
+    roles_str = ", ".join([w.get("role", "Expert") for w in worker_tasks])
+    
     return {
         "worker_results": results,
         "next_step": "summarizer",
-        "internal_steps": [f"[Parallel Workers] {len(worker_tasks)} expert agents have completed their tasks concurrently."]
+        "internal_steps": [
+            f"[Parallel Workers] 分配了 {len(worker_tasks)} 个并行专家 Agent 开始处理。",
+            f"[Parallel Workers] 涉及的角色包括: {roles_str}。",
+            f"[Parallel Workers] 所有 {len(worker_tasks)} 个专家并发分析已完成，正在提交汇总..."
+        ]
     }
 
 async def summarizer_node(state: AgentState) -> Dict[str, Any]:
