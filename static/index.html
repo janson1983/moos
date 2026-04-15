@@ -473,22 +473,29 @@
                             scrollToBottom();
                             break;
                         case 'require_approval':
-                            // 拦截事件：展示同意和拒绝按钮
+                            // 拦截事件：展示同意和拒绝按钮（紧凑版）
                             const uniqueBoxId = `approval-${taskId}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
                             const approvalBox = document.createElement('div');
                             approvalBox.id = uniqueBoxId;
-                            approvalBox.style.background = 'rgba(255,165,0,0.1)';
-                            approvalBox.style.border = '1px solid orange';
-                            approvalBox.style.padding = '15px';
-                            approvalBox.style.borderRadius = '8px';
-                            approvalBox.style.marginTop = '15px';
+                            approvalBox.style.background = 'rgba(255,165,0,0.05)';
+                            approvalBox.style.border = '1px solid rgba(255,165,0,0.4)';
+                            approvalBox.style.padding = '8px 12px';
+                            approvalBox.style.borderRadius = '6px';
+                            approvalBox.style.marginTop = '8px';
+                            approvalBox.style.display = 'flex';
+                            approvalBox.style.justifyContent = 'space-between';
+                            approvalBox.style.alignItems = 'center';
+                            approvalBox.style.flexWrap = 'wrap';
+                            approvalBox.style.gap = '10px';
                             
                             approvalBox.innerHTML = `
-                                <div style="color: orange; font-weight: bold; margin-bottom: 10px;">⚠️ 敏感操作预警</div>
-                                <div style="margin-bottom: 15px;">Agent 想要执行敏感操作（如删除文件、执行命令）。请确认是否允许。</div>
-                                <div style="display: flex; gap: 10px;">
-                                    <button onclick="handleApproval(true, '${uniqueBoxId}')" style="background: #4caf50; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer;">允许执行 (Approve)</button>
-                                    <button onclick="handleApproval(false, '${uniqueBoxId}')" style="background: #f44336; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer;">拒绝执行 (Reject)</button>
+                                <div style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 200px;">
+                                    <span style="color: orange; font-weight: bold; font-size: 0.9rem; flex-shrink: 0;">⚠️ 敏感操作预警:</span>
+                                    <span style="font-size: 0.85rem; color: #ccc;">Agent 请求执行敏感操作，请确认是否允许。</span>
+                                </div>
+                                <div style="display: flex; gap: 8px; flex-shrink: 0;">
+                                    <button onclick="handleApproval(true, '${uniqueBoxId}')" style="background: #4caf50; color: white; border: none; padding: 5px 12px; border-radius: 4px; cursor: pointer; font-size: 0.85rem;">允许</button>
+                                    <button onclick="handleApproval(false, '${uniqueBoxId}')" style="background: #f44336; color: white; border: none; padding: 5px 12px; border-radius: 4px; cursor: pointer; font-size: 0.85rem;">拒绝</button>
                                 </div>
                             `;
                             msgDiv.appendChild(approvalBox);
@@ -517,7 +524,9 @@
             
             const box = document.getElementById(boxId);
             if (box) {
-                box.innerHTML = `<div style="color: ${isApproved ? '#4caf50' : '#f44336'}; font-weight: bold;">[User ${isApproved ? 'Approved' : 'Rejected'}] 操作已提交，等待 Agent 响应...</div>`;
+                box.style.display = 'block';
+                box.style.padding = '8px 12px';
+                box.innerHTML = `<div style="color: ${isApproved ? '#4caf50' : '#f44336'}; font-size: 0.85rem;">✓ [User ${isApproved ? 'Approved' : 'Rejected'}] 操作已提交，等待 Agent 响应...</div>`;
             }
 
             try {
