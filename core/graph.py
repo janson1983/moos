@@ -318,9 +318,14 @@ async def reviewer_node(state: AgentState) -> Dict[str, Any]:
             logger.info("[Reviewer] Conclusion: Task COMPLETED. Ending flow.")
             return {"next_step": END, "internal_steps": ["[Reviewer] 目标已达成或已答复，结束当前执行流。"]}
         else:
-            # 如果没完成，回到 planner 重新审视计划
+            # 如果没完成，回到 planner 重新审视计划，并给 Executor 注入提示
             logger.info("[Reviewer] Conclusion: Task INCOMPLETE. Returning to planner.")
-            return {"next_step": "planner", "internal_steps": ["[Reviewer] 任务未完全结束，请求重新规划。"]}
+            from langchain_core.messages import SystemMessage
+            return {
+                "next_step": "planner", 
+                "messages": [SystemMessage(content="[System Reviewer] The task is NOT complete yet. You must use tools to take further actions. Do not just talk.")],
+                "internal_steps": ["[Reviewer] 任务未完全结束，系统提示继续执行工具。"]
+            }
     except Exception as e:
         logger.exception(f"[Reviewer] LLM check failed: {e}")
         return {"next_step": END, "internal_steps": ["[Reviewer] Error checking completion status, pausing."]}
