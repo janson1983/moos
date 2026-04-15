@@ -48,7 +48,7 @@ async def approve_agent(request: ApproveRequest) -> Dict[str, Any]:
     config = {"configurable": {"thread_id": request.task_id}}
     current_state = graph.get_state(config)
     
-    if not current_state or not current_state.values.get("next_step") == "await_approval":
+    if not current_state or not current_state.values.get("awaiting_approval"):
         logger.warning(f"Task {request.task_id} has no pending approval state.")
         return {"status": "error", "message": "No pending approval for this task"}
         

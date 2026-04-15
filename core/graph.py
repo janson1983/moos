@@ -209,6 +209,14 @@ CRITICAL INSTRUCTION: If a tool returned an error in the previous steps, analyze
                 next_step = "await_approval"
                 msg = f"Security Intercept: LLM requested sensitive tools ({sensitive_requested}). Awaiting user approval."
                 output_msg = response # 先把 tool_calls 存到 message 里
+                
+                # 更新状态
+                return {
+                    "messages": [output_msg],
+                    "next_step": next_step,
+                    "awaiting_approval": True, # 标记为等待审批
+                    "internal_steps": [f"[Executor] {msg}"]
+                }
             else:
                 next_step = "tool_node"
                 msg = f"LLM decided to call tools: {[t['name'] for t in response.tool_calls]}"
