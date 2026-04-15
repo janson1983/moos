@@ -184,6 +184,8 @@ async def stream_agent(task_id: str, request: Request, message: str = None):
     例如 GET /v1/agent/stream/task_001?message=帮我分析一下文件
     如果不传 message，则视为从上一次断点 (如 Approval 后) 恢复执行。
     """
+    # 修复：当不带 message 时 (也就是 Approval 后重连)，我们需要显式传入 `None`。
+    # 因为 FastAPI 对于 GET 中不传的 query param 会给 None，我们只需透传。
     return StreamingResponse(
         _event_generator(task_id, message),
         media_type="text/event-stream"
