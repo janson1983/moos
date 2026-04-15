@@ -329,7 +329,7 @@ def should_continue(state: AgentState) -> str:
     路由逻辑，根据 next_step 决定下一个节点
     """
     # 如果处于等待审批状态，直接中断流，图引擎在这里暂停
-    if state.get("next_step") == "await_approval":
+    if state.get("awaiting_approval"):
         return END
         
     return state.get("next_step", END)

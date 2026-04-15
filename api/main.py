@@ -53,16 +53,16 @@ async def approve_agent(request: ApproveRequest) -> Dict[str, Any]:
         return {"status": "error", "message": "No pending approval for this task"}
         
     if request.approved:
-        # 用户同意，更新状态，让下一个节点是 tool_node
+        # 用户同意，更新状态，让下一个节点是 tool_node，并清除审批挂起标志
         logger.info(f"User approved sensitive tools for task {request.task_id}.")
-        graph.update_state(config, {"awaiting_approval": True, "next_step": "tool_node"})
+        graph.update_state(config, {"awaiting_approval": False, "next_step": "tool_node"})
         return {"status": "success", "message": "Operation approved. You can reconnect to /stream to continue."}
     else:
-        # 用户拒绝，注入一条系统消息告知大模型，并退回 executor 重新思考
+        # 用户拒绝，注入一条系统消息告知大模型，并退回 executor 重新思考，并清除审批挂起标志
         logger.info(f"User REJECTED sensitive tools for task {request.task_id}.")
         from langchain_core.messages import SystemMessage
         reject_msg = SystemMessage(content="USER REJECTED your previous tool call request for security reasons. Please try another approach or explain why you must do this.")
-        graph.update_state(config, {"messages": [reject_msg], "next_step": "executor"})
+        graph.update_state(config, {"messages": [reject_msg], "awaiting_approval": False, "next_step": "executor"})
         return {"status": "success", "message": "Operation rejected. You can reconnect to /stream to see new plan."}
 
 @router.post("/run")
