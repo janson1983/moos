@@ -363,7 +363,8 @@ def build_graph() -> StateGraph:
     workflow.add_conditional_edges("summarizer", should_continue, {END: END})
     
     # 标准工具任务流转
-    workflow.add_conditional_edges("executor", should_continue, {"tool_node": "tool_node", "reviewer": "reviewer", END: END})
+    # 修复 KeyError 'executor': 当从拦截状态恢复时，我们需要允许跳转到 executor 自身
+    workflow.add_conditional_edges("executor", should_continue, {"tool_node": "tool_node", "reviewer": "reviewer", "executor": "executor", END: END})
     workflow.add_conditional_edges("tool_node", should_continue, {"executor": "executor", END: END})
     workflow.add_conditional_edges("reviewer", should_continue, {"planner": "planner", END: END})
     
