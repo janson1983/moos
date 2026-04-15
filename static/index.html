@@ -474,8 +474,9 @@
                             break;
                         case 'require_approval':
                             // 拦截事件：展示同意和拒绝按钮
+                            const uniqueBoxId = `approval-${taskId}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
                             const approvalBox = document.createElement('div');
-                            approvalBox.id = `approval-${taskId}`;
+                            approvalBox.id = uniqueBoxId;
                             approvalBox.style.background = 'rgba(255,165,0,0.1)';
                             approvalBox.style.border = '1px solid orange';
                             approvalBox.style.padding = '15px';
@@ -486,8 +487,8 @@
                                 <div style="color: orange; font-weight: bold; margin-bottom: 10px;">⚠️ 敏感操作预警</div>
                                 <div style="margin-bottom: 15px;">Agent 想要执行敏感操作（如删除文件、执行命令）。请确认是否允许。</div>
                                 <div style="display: flex; gap: 10px;">
-                                    <button onclick="handleApproval(true)" style="background: #4caf50; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer;">允许执行 (Approve)</button>
-                                    <button onclick="handleApproval(false)" style="background: #f44336; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer;">拒绝执行 (Reject)</button>
+                                    <button onclick="handleApproval(true, '${uniqueBoxId}')" style="background: #4caf50; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer;">允许执行 (Approve)</button>
+                                    <button onclick="handleApproval(false, '${uniqueBoxId}')" style="background: #f44336; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer;">拒绝执行 (Reject)</button>
                                 </div>
                             `;
                             msgDiv.appendChild(approvalBox);
@@ -511,10 +512,10 @@
             };
         }
 
-        async function handleApproval(isApproved) {
+        async function handleApproval(isApproved, boxId) {
             if (!currentTaskId) return;
             
-            const box = document.getElementById(`approval-${currentTaskId}`);
+            const box = document.getElementById(boxId);
             if (box) {
                 box.innerHTML = `<div style="color: ${isApproved ? '#4caf50' : '#f44336'}; font-weight: bold;">[User ${isApproved ? 'Approved' : 'Rejected'}] 操作已提交，等待 Agent 响应...</div>`;
             }
