@@ -68,7 +68,7 @@
 
 **架构与功能要求：**
 1. **核心 Agent (core/graph.py)**:
-   - 使用 `LangGraph` 构建状态图，包含基础循环节点：`Planner` (任务规划) -> `Executor` (工具调用) -> `Tool_Node` (执行) -> `Reviewer` (反思)。
+   - 使用 `LangGraph` 构建状态图，包含基础循环节点：`Planner` (任务规划) -> `Executor` (工具调用) -> `Tool_Node` (执行) -> `Reviewer` (反思)。并且要求能够在这几个循环节点记录详细的过程日志到 `logs/moos.log` 中。
    - 引入 **Map-Reduce 并发多 Agent 架构**：当 `Planner` 判断任务需要多视角或不同角色时，生成 JSON 数组流转给 `parallel_workers` 节点并发执行大模型分析，最后由 `summarizer` 节点汇总结论。
    - 必须使用异步 (`async`) 并在执行过程中抛出中间的思考步骤 (`internal_steps`)。
 2. **工具集 (Tools)**:
@@ -76,8 +76,9 @@
    - 核心代码编辑工具：实现 `edit_file` (全量写入覆盖) 和 `replace_in_file` (基于 SEARCH/REPLACE 块的精准局部替换)。
    - 其他工具：`delete_file` (删除文件), `execute_shell` (执行受限命令)。
    - **绝对安全限制**：所有文件的读取、修改、删除，以及 Shell 的执行，必须被严格限制在一个隔离的 `workspace/` 目录下，禁止任何 `../` 路径穿越攻击。
-3. **配置文件 (core/config.py & .env)**:
-   - 将 LLM 的 API 配置（Model, Base URL, API Key等）和系统配置（如 Workspace 路径、最大历史记录数）抽离到单独的 `core/config.py` 中，并通过 `python-dotenv` 读取项目根目录的 `.env` 文件。
+3. **配置文件与工具分离 (core/config.py & tools/builtin.py)**:
+   - 将 LLM 的 API 配置（Model, Base URL, API Key等）、系统日志输出配置 (包含文件轮转记录机制) 抽离到单独的 `core/config.py` 中，并通过 `python-dotenv` 读取项目根目录的 `.env` 文件。
+   - 所有内置操作工具统一放置于 `tools/builtin.py` 方便后续拓展。
 4. **后端接口 (api/main.py)**:
    - 提供一个处理文件上传的 `/v1/upload` POST 接口（文件需存入 `workspace/`）。
    - 提供一个基于 SSE 的 `/v1/agent/stream/{task_id}` GET 接口，能够实时推送大模型的 Thought、Tool Call、Observation 和最终 Result。

@@ -32,13 +32,16 @@ moos/
 ├── api/
 │   └── main.py          # FastAPI 服务入口，包含 /v1/upload 和 /v1/agent/stream SSE流式接口
 ├── core/
-│   ├── config.py        # 系统全局配置与大模型 (LLM) 初始化设置
-│   └── graph.py         # LangGraph 核心逻辑（节点定义、图的组装、工具函数的实现）
+│   ├── config.py        # 系统全局配置、日志配置与大模型 (LLM) 初始化设置
+│   └── graph.py         # LangGraph 核心逻辑（节点定义与图的组装）
 ├── schema/
 │   └── state.py         # LangGraph 的共享状态结构 (AgentState) 定义
+├── tools/
+│   └── builtin.py       # 内置的本地沙盒文件操作与系统工具
 ├── static/
-│   └── index.html       # 纯前端原生 HTML/JS 页面，实现了交互UI、文件上传和 SSE 监听
+│   └── index.html       # 纯前端原生 HTML/JS 页面，实现了交互UI、文件上传、SSE 监听及拦截确认框
 ├── workspace/           # 沙盒工作区，Agent 操作文件的唯一合法目录（自动生成）
+├── logs/                # 系统日志目录（自动生成，滚动保留）
 ├── action.md            # 生成此项目的终极 Prompt (Prompt for AI Copilot) 💡
 ├── .env.example         # 环境变量配置模板
 ├── .gitignore           # Git 忽略配置
