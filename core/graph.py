@@ -124,9 +124,11 @@ def _truncate_history(messages: list) -> list:
     # 始终保留第一条请求（通常是任务定义），然后保留最新的 MAX_HISTORY_MESSAGES - 1 条
     return [messages[0]] + messages[-(MAX_HISTORY_MESSAGES - 1):]
 
+import json
+
 async def planner_node(state: AgentState) -> Dict[str, Any]:
     """
-    Supervisor / Planner 节点：负责将用户目标拆解为任务列表。
+    Supervisor / Planner 节点：负责将用户目标拆解为任务列表，或分配给多个并发 Agent。
     """
     messages = state.get("messages", [])
     current_plan = state.get("current_plan", "")
@@ -135,29 +137,116 @@ async def planner_node(state: AgentState) -> Dict[str, Any]:
         return {"next_step": END, "internal_steps": ["[Planner] No messages found."]}
         
     llm = get_llm()
-    system_prompt = SystemMessage(content="You are a brilliant Planner Agent. Your job is to break down the user's task into a step-by-step numbered plan. Keep it concise. Please read the conversation history and focus on the most recent user instructions to update or create the plan.")
+    system_prompt = SystemMessage(content='''You are a brilliant Planner Agent. Your job is to analyze the user's request.
+If the request requires or explicitly asks for MULTIPLE different roles/agents to process the same task concurrently (e.g., "use different roles", "parallel agents"), you MUST output ONLY a valid JSON array of tasks. 
+Each JSON object must have 'role' and 'task' keys. Example:
+[
+  {"role": "Financial Analyst", "task": "Analyze the financial impact..."},
+  {"role": "Risk Manager", "task": "Evaluate potential risks..."}
+]
+
+Otherwise, if it is a standard sequential task, output a concise step-by-step numbered plan in plain text.
+''')
     
-    # 优化点 3：Planner 记忆隔离优化。将截断后的历史消息序列化给 Planner，使其能阅读整个上下文而不是只看第一句话。
     history_messages = _truncate_history(messages)
     conversation_context = "\n".join([f"{msg.type}: {msg.content}" for msg in history_messages if msg.content])
     
     try:
         response = await llm.ainvoke([
             system_prompt, 
-            HumanMessage(content=f"Here is the conversation history:\n{conversation_context}\n\nPlease generate or update the plan based on the latest context.")
+            HumanMessage(content=f"Here is the conversation history:\n{conversation_context}\n\nPlease generate the plan or JSON array of roles based on the latest context.")
         ])
         current_plan = response.content
-        step_msg = "Planner dynamically updated the plan based on full context."
+        
+        # 尝试解析 JSON 判断是否为并发多 Agent 任务
+        text_content = current_plan.strip()
+        if text_content.startswith("```json"):
+            text_content = text_content[7:-3].strip()
+        
+        worker_tasks = []
+        next_step = "executor"
+        try:
+            parsed = json.loads(text_content)
+            if isinstance(parsed, list) and len(parsed) > 0 and "role" in parsed[0] and "task" in parsed[0]:
+                worker_tasks = parsed
+                next_step = "parallel_workers"
+                step_msg = f"Planner assigned tasks to {len(worker_tasks)} parallel agents."
+            else:
+                step_msg = "Planner dynamically updated the plan based on full context."
+        except json.JSONDecodeError:
+            step_msg = "Planner dynamically updated the plan based on full context."
+
     except Exception as e:
         logger.error(f"Planner LLM call failed: {e}")
         step_msg = f"Planner failed to generate plan due to error: {e}"
+        worker_tasks = []
+        next_step = "executor"
         if not current_plan:
             current_plan = "Error: Plan generation failed."
         
     return {
         "current_plan": current_plan,
-        "next_step": "executor",
+        "worker_tasks": worker_tasks,
+        "next_step": next_step,
         "internal_steps": [f"[Planner] {step_msg}"]
+    }
+
+async def parallel_workers_node(state: AgentState) -> Dict[str, Any]:
+    """
+    并发执行多个 Agent 任务的节点。
+    """
+    worker_tasks = state.get("worker_tasks", [])
+    if not worker_tasks:
+        return {"next_step": "executor"}
+    
+    llm = get_llm()
+    
+    async def run_worker(worker):
+        role = worker.get("role", "Expert")
+        task = worker.get("task", "")
+        prompt = SystemMessage(content=f"You are an expert with the role: {role}. Your task is: {task}. Please provide your detailed analysis and solution. Be direct and professional.")
+        try:
+            res = await llm.ainvoke([prompt])
+            return f"--- [{role}] Report ---\n{res.content}"
+        except Exception as e:
+            return f"--- [{role}] Report ---\nError: {e}"
+            
+    tasks = [run_worker(w) for w in worker_tasks]
+    results = await asyncio.gather(*tasks)
+    
+    return {
+        "worker_results": results,
+        "next_step": "summarizer",
+        "internal_steps": [f"[Parallel Workers] {len(worker_tasks)} expert agents have completed their tasks concurrently."]
+    }
+
+async def summarizer_node(state: AgentState) -> Dict[str, Any]:
+    """
+    汇总多个 Agent 结果的节点。
+    """
+    results = state.get("worker_results", [])
+    messages = state.get("messages", [])
+    
+    llm = get_llm()
+    sys_prompt = SystemMessage(content="You are a Master Summarizer Agent. Several expert agents have analyzed the user's request from different perspectives. Your job is to synthesize their findings into a single, cohesive, and comprehensive final conclusion. Format it beautifully with Markdown.")
+    
+    user_req = messages[-1].content if messages else "Unknown request."
+    combined_results = "\n\n".join(results)
+    
+    prompt = HumanMessage(content=f"Original Request: {user_req}\n\nExpert Reports:\n{combined_results}\n\nPlease provide the final summary and conclusion.")
+    
+    try:
+        res = await llm.ainvoke([sys_prompt, prompt])
+        final_message = res
+    except Exception as e:
+        final_message = AIMessage(content=f"Error summarizing results: {e}")
+        
+    return {
+        "messages": [final_message],
+        "next_step": END,
+        "internal_steps": ["[Summarizer] Master agent synthesized all reports into the final conclusion."],
+        "worker_tasks": [], 
+        "worker_results": []
     }
 
 async def executor_node(state: AgentState) -> Dict[str, Any]:
@@ -306,9 +395,23 @@ def build_graph() -> StateGraph:
     workflow.add_node("tool_node", tool_node)
     workflow.add_node("reviewer", reviewer_node)
     
+    # 新增并发多 Agent 节点
+    workflow.add_node("parallel_workers", parallel_workers_node)
+    workflow.add_node("summarizer", summarizer_node)
+    
     workflow.set_entry_point("planner")
     
-    workflow.add_conditional_edges("planner", should_continue, {"executor": "executor", END: END})
+    workflow.add_conditional_edges("planner", should_continue, {
+        "executor": "executor", 
+        "parallel_workers": "parallel_workers",
+        END: END
+    })
+    
+    # 并发任务流转
+    workflow.add_conditional_edges("parallel_workers", should_continue, {"summarizer": "summarizer"})
+    workflow.add_conditional_edges("summarizer", should_continue, {END: END})
+    
+    # 标准工具任务流转
     workflow.add_conditional_edges("executor", should_continue, {"tool_node": "tool_node", "reviewer": "reviewer", END: END})
     workflow.add_conditional_edges("tool_node", should_continue, {"executor": "executor", END: END})
     workflow.add_conditional_edges("reviewer", should_continue, {"planner": "planner", END: END})

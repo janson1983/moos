@@ -20,3 +20,9 @@ class AgentState(TypedDict):
     
     # 任务标识符
     task_id: str
+    
+    # 多智能体并发任务列表 (每个元素包含 'role' 和 'task')
+    worker_tasks: list[dict]
+    
+    # 多智能体并发执行的结果集合
+    worker_results: list[str]
