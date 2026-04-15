@@ -17,9 +17,10 @@ MOOS 是一个基于 **LangGraph** 和 **FastAPI** 构建的**极简多智能体
 - 🧠 **思维闭环**：内置 Planner、Executor、Tool Node、Reviewer 四大核心节点，支持动态目标拆解与自我纠错。
 - 🚀 **并发多 Agent 架构 (Map-Reduce)**：当任务需要多视角或多角色分析时，Planner 可自动拆解子任务并分配给多个 Worker 并发执行，最后由 Master Summarizer 节点汇总结论，极大提升复杂任务的处理效率。
 - ⚡ **SSE 流式输出**：前端实时感知 Agent 的内部执行步骤（Internal Steps）和调用状态，告别长时间的黑盒等待。
-- 🛡️ **沙盒安全机制**：工具的执行范围被严格限制在 `workspace/` 目录下，防止大模型通过 `../` 或绝对路径破坏宿主机的系统文件。
+- 🛡️ **沙盒安全与 Human-in-the-Loop (HITL)**：工具的执行范围被严格限制在 `workspace/` 目录下。对于敏感操作（如删除文件、执行 Shell 命令），系统会自动拦截并挂起图执行，向前端推送右下角优雅的**浮窗审批（Approve/Reject）**，在用户确认后再恢复执行断点。
 - 📂 **多文件暂存区（Staging Area）**：原生支持多个文件的选中上传与可视化管理，结合 Prompt 一起发送给 Agent 进行分析。
-- 🛠️ **核心能力**：自带文件读取、局部文件替换 (`replace_in_file`)、全量写入、文件删除、正则全局搜索 (`search_files`) 以及安全 Shell 执行等基础 Tool。模拟了主流 AI 编程助手（如 Cline, Cursor）的代码库探索与 AST 级别修改的核心能力。
+- 🛠️ **核心能力**：自带文件读取、局部文件替换 (`replace_in_file`)、全量写入、文件删除、正则全局搜索 (`search_files`) 以及安全 Shell 执行等基础 Tool。模拟了主流 AI 编程助手（如 Cline, Cursor）的代码库探索与修改的核心能力。
+- 🔄 **死循环防御**：在 Reviewer 节点打回重做时，系统会自动向 Executor 注入强硬的 `SystemMessage` 提示，强制要求大模型必须调用工具行动，避免陷入 `Planner -> Executor -> Reviewer` 的无限纯文本对话死循环。
 
 ---
 
@@ -101,6 +102,7 @@ uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
 1. 点击输入框左侧的 📎 图标，上传电脑里的几个本地文件。
 2. 在输入框中下达指令，例如：“**请分析一下我刚上传的这几个文件，总结出它们的共通点，并将总结结果写到 workspace/summary.md 文件中。**”
 3. 观察右侧 Agent 是如何一步步规划、读取、分析并最终执行写入操作的！
+4. **测试敏感操作拦截**：让 Agent 执行 `ls -al` 或尝试删除文件，观察右下角弹出的审批确认浮窗，点击“允许”后观察任务恢复执行的过程。
 
 ---
 
