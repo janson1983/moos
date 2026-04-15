@@ -72,7 +72,9 @@
    - 引入 **Map-Reduce 并发多 Agent 架构**：当 `Planner` 判断任务需要多视角或不同角色时，生成 JSON 数组流转给 `parallel_workers` 节点并发执行大模型分析，最后由 `summarizer` 节点汇总结论。
    - 必须使用异步 (`async`) 并在执行过程中抛出中间的思考步骤 (`internal_steps`)。
 2. **工具集 (Tools)**:
-   - 实现四个基础工具：`read_file`, `edit_file`, `delete_file`, `execute_shell`。
+   - 核心文件与代码探索：实现 `read_file` (读取), `search_files` (基于正则的全局内容检索)。
+   - 核心代码编辑工具：实现 `edit_file` (全量写入覆盖) 和 `replace_in_file` (基于 SEARCH/REPLACE 块的精准局部替换)。
+   - 其他工具：`delete_file` (删除文件), `execute_shell` (执行受限命令)。
    - **绝对安全限制**：所有文件的读取、修改、删除，以及 Shell 的执行，必须被严格限制在一个隔离的 `workspace/` 目录下，禁止任何 `../` 路径穿越攻击。
 3. **配置文件 (core/config.py & .env)**:
    - 将 LLM 的 API 配置（Model, Base URL, API Key等）和系统配置（如 Workspace 路径、最大历史记录数）抽离到单独的 `core/config.py` 中，并通过 `python-dotenv` 读取项目根目录的 `.env` 文件。
